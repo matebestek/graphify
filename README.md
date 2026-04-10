@@ -232,10 +232,48 @@ Works with any mix of file types:
 | Type | Extensions | Extraction |
 |------|-----------|------------|
 | Code | `.py .ts .js .jsx .tsx .go .rs .java .c .cpp .rb .cs .kt .scala .php .swift .lua .zig .ps1 .ex .exs .m .mm .jl` | AST via tree-sitter + call-graph + docstring/comment rationale |
-| Docs | `.md .txt .rst` | Concepts + relationships + design rationale via Claude |
-| Office | `.docx .xlsx` | Converted to markdown then extracted via Claude (requires `pip install graphifyy[office]`) |
+| Docs | `.md .txt .rst` | Concepts + relationships + design rationale via Claude, Ollama, or local torch/HF models |
+| Office | `.docx .xlsx` | Converted to markdown then extracted semantically (requires `pip install graphifyy[office]`) |
 | Papers | `.pdf` | Citation mining + concept extraction |
-| Images | `.png .jpg .webp .gif` | Claude vision - screenshots, diagrams, any language |
+| Images | `.png .jpg .webp .gif` | Claude vision or local Ollama vision models |
+
+## Local LLM usage
+
+You can now run `graphify` directly from the terminal without relying on a hosted coding assistant workflow:
+
+```bash
+graphify . --semantic-backend none --no-viz
+```
+
+### Ollama
+
+```bash
+ollama serve
+ollama pull llama3.2
+graphify . --semantic-backend ollama --ollama-model llama3.2
+```
+
+For image-heavy corpora, use a vision model such as `llava`:
+
+```bash
+graphify . --semantic-backend ollama --ollama-model llava
+```
+
+### torch / local Hugging Face models
+
+```bash
+pip install transformers sentence-transformers
+graphify . --semantic-backend torch --local-model sentence-transformers/all-MiniLM-L6-v2
+```
+
+### Watch mode with a local backend
+
+```bash
+graphify . --watch --semantic-backend ollama --ollama-model llama3.2
+graphify . --watch --semantic-backend torch --local-model sentence-transformers/all-MiniLM-L6-v2
+```
+
+> If `graphify .` still fails in your shell, activate the repo environment first or use `./.venv/bin/graphify .` so you pick up the updated local CLI.
 
 ## What you get
 

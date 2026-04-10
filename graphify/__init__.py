@@ -19,6 +19,8 @@ def __getattr__(name):
         "to_svg": ("graphify.export", "to_svg"),
         "to_canvas": ("graphify.export", "to_canvas"),
         "to_wiki": ("graphify.wiki", "to_wiki"),
+        "run_pipeline": ("graphify.pipeline", "run_pipeline"),
+        "extract_semantic": ("graphify.semantic_local", "extract_semantic"),
     }
     if name in _map:
         import importlib

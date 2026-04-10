@@ -598,6 +598,109 @@ def claude_uninstall(project_dir: Path | None = None) -> None:
     _uninstall_claude_hook(project_dir or Path("."))
 
 
+def _scan_parser(prog: str = "graphify"):
+    import argparse
+    import os
+
+    parser = argparse.ArgumentParser(
+        prog=prog,
+        description="Run the graphify pipeline locally on a folder or file.",
+    )
+    parser.add_argument("path", nargs="?", default=".", help="Folder or file to scan (default: .)")
+    parser.add_argument(
+        "--semantic-backend",
+        "--llm-backend",
+        dest="semantic_backend",
+        default=os.getenv("GRAPHIFY_SEMANTIC_BACKEND", "auto"),
+        choices=["auto", "none", "ollama", "torch", "heuristic"],
+        help="Local semantic backend (default: auto)",
+    )
+    parser.add_argument("--no-semantic", action="store_true", help="Disable semantic extraction and run AST-only")
+    parser.add_argument("--ollama-model", default=os.getenv("GRAPHIFY_OLLAMA_MODEL"), help="Ollama model name (for --semantic-backend ollama)")
+    parser.add_argument("--ollama-host", default=os.getenv("GRAPHIFY_OLLAMA_HOST", "http://127.0.0.1:11434"), help="Ollama server URL")
+    parser.add_argument("--local-model", default=os.getenv("GRAPHIFY_LOCAL_MODEL"), help="Local Hugging Face / torch model name or path")
+    parser.add_argument("--device", default=os.getenv("GRAPHIFY_TORCH_DEVICE"), help="Torch device override (cpu, cuda, mps)")
+    parser.add_argument("--no-viz", action="store_true", help="Skip HTML output and write JSON/report only")
+    parser.add_argument("--svg", action="store_true", help="Also export graph.svg")
+    parser.add_argument("--graphml", action="store_true", help="Also export graph.graphml")
+    parser.add_argument("--wiki", action="store_true", help="Also build graphify-out/wiki/")
+    parser.add_argument("--obsidian", action="store_true", help="Also export an Obsidian vault")
+    parser.add_argument("--obsidian-dir", help="Custom Obsidian vault directory")
+    parser.add_argument("--watch", action="store_true", help="Watch the target and refresh the graph as files change")
+    parser.add_argument("--debounce", type=float, default=3.0, help="Watch debounce in seconds (default: 3.0)")
+    parser.add_argument("--follow-symlinks", action="store_true", help="Follow symlinked directories while scanning")
+    parser.add_argument("--quiet", action="store_true", help="Reduce console output and show only the final summary")
+    return parser
+
+
+def _run_scan_cli(argv: list[str]) -> None:
+    from graphify.pipeline import run_pipeline
+
+    explicit_run = bool(argv and argv[0] == "run")
+    parser = _scan_parser("graphify run" if explicit_run else "graphify")
+    args = parser.parse_args(argv[1:] if explicit_run else argv)
+
+    if args.no_semantic:
+        args.semantic_backend = "none"
+
+    target = Path(args.path).expanduser().resolve()
+
+    if args.watch:
+        from graphify.watch import watch
+
+        watch(
+            target,
+            debounce=args.debounce,
+            semantic_backend=args.semantic_backend,
+            ollama_model=args.ollama_model,
+            ollama_host=args.ollama_host,
+            local_model=args.local_model,
+            device=args.device,
+            follow_symlinks=args.follow_symlinks,
+        )
+        return
+
+    result = run_pipeline(
+        target,
+        semantic_backend=args.semantic_backend,
+        ollama_model=args.ollama_model,
+        ollama_host=args.ollama_host,
+        local_model=args.local_model,
+        device=args.device,
+        no_viz=args.no_viz,
+        graphml=args.graphml,
+        svg=args.svg,
+        wiki=args.wiki,
+        obsidian=args.obsidian,
+        obsidian_dir=args.obsidian_dir,
+        follow_symlinks=args.follow_symlinks,
+        verbose=not args.quiet,
+    )
+
+    detection = result["detection"]
+    if detection.get("total_files", 0) == 0:
+        print(f"No supported files found in {target}.", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Corpus: {detection['total_files']} files · ~{detection['total_words']:,} words")
+    print(f"  code:     {len(detection.get('files', {}).get('code', []))} files")
+    print(f"  docs:     {len(detection.get('files', {}).get('document', []))} files")
+    print(f"  papers:   {len(detection.get('files', {}).get('paper', []))} files")
+    print(f"  images:   {len(detection.get('files', {}).get('image', []))} files")
+    print(f"Semantic backend: {args.semantic_backend} -> {result.get('semantic_backend', args.semantic_backend)}")
+
+    if detection.get("warning"):
+        print(f"Note: {detection['warning']}")
+
+    for warning in result.get("warnings", []):
+        print(f"warning: {warning}")
+
+    print()
+    print("Wrote:")
+    for generated in result.get("generated", []):
+        print(f"  - {generated}")
+
+
 def main() -> None:
     # Check all known skill install locations for a stale version stamp
     for cfg in _PLATFORM_CONFIG.values():
@@ -605,7 +708,17 @@ def main() -> None:
         _check_skill_version(skill_dst)
 
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
-        print("Usage: graphify <command>")
+        print("Usage:")
+        print("  graphify <path> [options]     run the local pipeline on a folder or file")
+        print("  graphify run [path] [options] same as above, explicit form")
+        print("  graphify <command>")
+        print()
+        print("Local scan options:")
+        print("  --semantic-backend P   auto|none|ollama|torch|heuristic (default: auto)")
+        print("  --ollama-model NAME    local Ollama model name")
+        print("  --local-model NAME     local Hugging Face / torch model name or path")
+        print("  --no-viz               skip HTML output")
+        print("  --watch                watch for file changes and refresh outputs")
         print()
         print("Commands:")
         print("  install [--platform P]  copy skill to platform config dir (claude|windows|codex|opencode|claw|droid|trae|trae-cn)")
@@ -645,6 +758,9 @@ def main() -> None:
         return
 
     cmd = sys.argv[1]
+    if cmd == "run" or (cmd not in _PLATFORM_CONFIG and cmd not in {"install", "hook", "query", "save-result", "benchmark", "gemini", "cursor", "claude", "codex", "opencode", "claw", "droid", "trae", "trae-cn"} and not cmd.startswith("-")):
+        _run_scan_cli(sys.argv[1:])
+        return
     if cmd == "install":
         # Default to windows platform on Windows, claude elsewhere
         default_platform = "windows" if platform.system() == "Windows" else "claude"

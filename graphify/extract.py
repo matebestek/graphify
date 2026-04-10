@@ -2565,13 +2565,21 @@ def _check_tree_sitter_version() -> None:
         )
 
 
-def extract(paths: list[Path]) -> dict:
+def extract(
+    paths: list[Path],
+    *,
+    progress_callback: Callable[[Path, int, int, str], None] | None = None,
+) -> dict:
     """Extract AST nodes and edges from a list of code files.
 
     Two-pass process:
     1. Per-file structural extraction (classes, functions, imports)
     2. Cross-file import resolution: turns file-level imports into
        class-level INFERRED edges (DigestAuth --uses--> Response)
+
+    If ``progress_callback`` is provided, it is called once per file as:
+    ``callback(path, index, total, status)`` where status is ``cached`` or
+    ``processing``.
     """
     _check_tree_sitter_version()
     per_file: list[dict] = []
@@ -2633,6 +2641,8 @@ def extract(paths: list[Path]) -> dict:
         if extractor is None:
             continue
         cached = load_cached(path, root)
+        if progress_callback is not None:
+            progress_callback(path, i + 1, total, "cached" if cached is not None else "processing")
         if cached is not None:
             per_file.append(cached)
             continue
